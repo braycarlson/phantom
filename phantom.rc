@@ -1,0 +1,7 @@
+#define ACTIVE_ICON    101
+#define INACTIVE_ICON  102
+#define APP_ICON       1
+
+ACTIVE_ICON ICON "asset/active.ico"
+INACTIVE_ICON ICON "asset/inactive.ico"
+APP_ICON ICON "asset/inactive.ico"
