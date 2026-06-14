@@ -60,7 +60,7 @@ pub const Application = struct {
             .menu = undefined,
             .mouse = Mouse.init(),
             .notification = undefined,
-            .random = std.Random.DefaultPrng.init(@intCast(std.time.timestamp())),
+            .random = std.Random.DefaultPrng.init(w32.GetTickCount64()),
             .state = .inactive,
         };
     }

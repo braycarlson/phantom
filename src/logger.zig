@@ -1,5 +1,6 @@
 const std = @import("std");
 const path_util = @import("path.zig");
+const nimble = @import("nimble");
 
 pub const backup_count_max: u32 = 5;
 pub const buffer_size: u32 = 4096;
@@ -17,7 +18,9 @@ pub const Date = struct {
     year: u16,
 
     pub fn current() Date {
-        const timestamp = std.time.timestamp();
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        const io = threaded.io();
+        const timestamp = std.Io.Timestamp.now(io, .real).toSeconds();
         std.debug.assert(timestamp >= 0);
 
         const datetime = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
@@ -50,9 +53,9 @@ pub const LoggerError = error{
 
 pub const Logger = struct {
     current_size: u32 = 0,
-    file: ?std.fs.File = null,
+    file: ?std.Io.File = null,
     last_date: ?Date = null,
-    mutex: std.Thread.Mutex = .{},
+    mutex: nimble.Mutex = .{},
     path: [path_length_max]u8 = undefined,
     path_length: u32 = 0,
     policy: RotationPolicy = .{ .size = 5 * 1024 * 1024 },
@@ -80,7 +83,9 @@ pub const Logger = struct {
         defer self.mutex.unlock();
 
         if (self.file) |file| {
-            file.close();
+            var threaded: std.Io.Threaded = .init_single_threaded;
+            const io = threaded.io();
+            file.close(io);
             self.file = null;
         }
     }
@@ -112,10 +117,9 @@ pub const Logger = struct {
     fn format_message(self: *Logger, buffer: *[buffer_size]u8, comptime format: []const u8, argument: anytype) LoggerError![]const u8 {
         _ = self;
 
-        var fixed_buffer_stream = std.io.fixedBufferStream(buffer);
-        const writer = fixed_buffer_stream.writer();
+        var writer = std.Io.Writer.fixed(buffer);
 
-        write_timestamp(writer) catch {
+        write_timestamp(&writer) catch {
             return LoggerError.FormatFailed;
         };
 
@@ -123,7 +127,7 @@ pub const Logger = struct {
             return LoggerError.FormatFailed;
         };
 
-        return fixed_buffer_stream.getWritten();
+        return writer.buffered();
     }
 
     fn get_path_slice(self: *const Logger) []const u8 {
@@ -160,35 +164,37 @@ pub const Logger = struct {
     fn open_file(self: *Logger) LoggerError!void {
         std.debug.assert(self.path_length > 0);
 
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        const io = threaded.io();
+
         const path = self.get_path_slice();
         const directory = std.fs.path.dirname(path) orelse {
             return LoggerError.InvalidPath;
         };
 
-        std.fs.makeDirAbsolute(directory) catch |err| {
+        std.Io.Dir.createDirAbsolute(io, directory, .default_dir) catch |err| {
             if (err != error.PathAlreadyExists) {
                 return LoggerError.DirectoryCreationFailed;
             }
         };
 
-        self.file = std.fs.createFileAbsolute(path, .{ .read = true, .truncate = false }) catch {
+        self.file = std.Io.Dir.createFileAbsolute(io, path, .{ .read = true, .truncate = false }) catch {
             return LoggerError.FileOpenFailed;
         };
 
-        const stat = self.file.?.stat() catch {
+        const stat = self.file.?.stat(io) catch {
             return LoggerError.StatFailed;
         };
 
         self.current_size = @intCast(stat.size);
-
-        self.file.?.seekTo(stat.size) catch {
-            return LoggerError.SeekFailed;
-        };
     }
 
     fn rotate(self: *Logger) LoggerError!void {
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        const io = threaded.io();
+
         if (self.file) |file| {
-            file.close();
+            file.close(io);
             self.file = null;
         }
 
@@ -198,17 +204,12 @@ pub const Logger = struct {
         const path = self.get_path_slice();
 
         var backup_path: [path_length_max]u8 = undefined;
-        var fixed_buffer_stream = std.io.fixedBufferStream(&backup_path);
-        const writer = fixed_buffer_stream.writer();
-
-        writer.print("{s}.1", .{path}) catch {
+        const backup = std.fmt.bufPrint(&backup_path, "{s}.1", .{path}) catch {
             return LoggerError.RotationFailed;
         };
 
-        const backup = fixed_buffer_stream.getWritten();
-
-        std.fs.deleteFileAbsolute(backup) catch {};
-        std.fs.renameAbsolute(path, backup) catch {};
+        std.Io.Dir.deleteFileAbsolute(io, backup) catch {};
+        std.Io.Dir.renameAbsolute(path, backup, io) catch {};
 
         self.open_file() catch {
             return LoggerError.FileOpenFailed;
@@ -216,7 +217,9 @@ pub const Logger = struct {
     }
 
     fn write_timestamp(writer: anytype) !void {
-        const timestamp = std.time.timestamp();
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        const io = threaded.io();
+        const timestamp = std.Io.Timestamp.now(io, .real).toSeconds();
         std.debug.assert(timestamp >= 0);
 
         const datetime = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
@@ -241,16 +244,15 @@ pub const Logger = struct {
         const file = self.file orelse return;
         const length: u32 = @intCast(content.len);
 
-        const count = file.write(content) catch {
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        const io = threaded.io();
+
+        file.writePositionalAll(io, content, self.current_size) catch {
             self.write_error += 1;
             return;
         };
 
-        if (count != content.len) {
-            self.write_error += 1;
-        }
-
-        file.sync() catch {
+        file.sync(io) catch {
             self.write_error += 1;
         };
 
