@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const nimble = @import("nimble");
-const w32 = @import("win32").everything;
+const win32 = @import("win32").everything;
 const wisp = @import("wisp");
 
 const constant = @import("constant.zig");
@@ -52,7 +52,7 @@ pub const Application = struct {
             .menu = undefined,
             .mouse = Mouse.init(),
             .notification = undefined,
-            .random = std.Random.DefaultPrng.init(w32.GetTickCount64()),
+            .random = std.Random.DefaultPrng.init(win32.GetTickCount64()),
             .state = .inactive,
         };
 
@@ -146,30 +146,38 @@ pub const Application = struct {
 
         const random = self.random.random();
 
-        const dx = random.intRangeAtMost(i32, constant.Movement.offset_min, constant.Movement.offset_max);
-        const dy = random.intRangeAtMost(i32, constant.Movement.offset_min, constant.Movement.offset_max);
+        const offset_x = random.intRangeAtMost(i32, constant.Movement.offset_min, constant.Movement.offset_max);
+        const offset_y = random.intRangeAtMost(i32, constant.Movement.offset_min, constant.Movement.offset_max);
 
-        std.debug.assert(dx >= constant.Movement.offset_min and dx <= constant.Movement.offset_max);
-        std.debug.assert(dy >= constant.Movement.offset_min and dy <= constant.Movement.offset_max);
+        std.debug.assert(offset_x >= constant.Movement.offset_min);
+        std.debug.assert(offset_x <= constant.Movement.offset_max);
+        std.debug.assert(offset_y >= constant.Movement.offset_min);
+        std.debug.assert(offset_y <= constant.Movement.offset_max);
 
-        _ = self.mouse.move_relative(dx, dy);
+        _ = self.mouse.move_relative(offset_x, offset_y);
 
         self.log("Moved mouse");
     }
 
     fn log(self: *Application, message: []const u8) void {
+        std.debug.assert(message.len > 0);
+
         if (self.logger) |logger| {
             logger.log("{s}", .{message});
         }
     }
 
     fn log_error(self: *Application, message: []const u8, err: anyerror) void {
+        std.debug.assert(message.len > 0);
+
         if (self.logger) |logger| {
             logger.log("{s}: {}", .{ message, err });
         }
     }
 
     fn log_state(self: *Application, value: State, reason: []const u8) void {
+        std.debug.assert(reason.len > 0);
+
         if (self.logger) |logger| {
             logger.log("State changed to {s} ({s})", .{ value.to_string(), reason });
         }
@@ -211,6 +219,8 @@ pub const Application = struct {
     }
 
     fn set_state(self: *Application, value: State, reason: []const u8) void {
+        std.debug.assert(reason.len > 0);
+
         self.state = value;
 
         self.icon.update(value);
@@ -227,9 +237,9 @@ pub const Application = struct {
     }
 };
 
-fn toggle_bind_wrapper(ctx: *anyopaque, key: *const Key) Response {
+fn toggle_bind_wrapper(context: *anyopaque, key: *const Key) Response {
     _ = key;
-    const self: *Application = @ptrCast(@alignCast(ctx));
+    const self: *Application = @ptrCast(@alignCast(context));
 
     self.toggle_state();
 

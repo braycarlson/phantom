@@ -7,14 +7,23 @@ pub const State = enum(u8) {
     }
 
     pub fn toggle(self: State) State {
-        return if (self == .active) State.inactive else State.active;
+        return switch (self) {
+            .active => .inactive,
+            .inactive => .active,
+        };
     }
 
     pub fn to_string(self: State) []const u8 {
-        return if (self == .active) "active" else "inactive";
+        return switch (self) {
+            .active => "active",
+            .inactive => "inactive",
+        };
     }
 
     pub fn to_action_string(self: State) []const u8 {
-        return if (self == .active) "Deactivate" else "Activate";
+        return switch (self) {
+            .active => "Deactivate",
+            .inactive => "Activate",
+        };
     }
 };
