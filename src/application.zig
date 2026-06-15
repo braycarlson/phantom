@@ -42,17 +42,9 @@ pub const Application = struct {
     random: std.Random.DefaultPrng,
     state: State,
 
-    pub fn init(logger: ?*Logger) !Application {
-        var app = App.init(.{
-            .name = "Phantom",
-            .tooltip = "Phantom",
-            .initial_state = "inactive",
-        });
-
-        _ = app.configure();
-
-        return Application{
-            .app = app,
+    pub fn init(self: *Application, logger: ?*Logger) void {
+        self.* = Application{
+            .app = undefined,
             .handler = undefined,
             .icon = undefined,
             .keyboard = Keyboard.init(),
@@ -63,6 +55,14 @@ pub const Application = struct {
             .random = std.Random.DefaultPrng.init(w32.GetTickCount64()),
             .state = .inactive,
         };
+
+        self.app.init(.{
+            .name = "Phantom",
+            .tooltip = "Phantom",
+            .initial_state = "inactive",
+        });
+
+        _ = self.app.configure();
     }
 
     pub fn configure(self: *Application) !void {
@@ -236,32 +236,36 @@ fn toggle_bind_wrapper(ctx: *anyopaque, key: *const Key) Response {
     return .consume;
 }
 
+fn current() ?*Application {
+    return instance.load(.seq_cst);
+}
+
 fn dispatch_exit() void {
-    const app = instance.load(.seq_cst) orelse return;
+    const app = current() orelse return;
     app.on_exit();
 }
 
 fn dispatch_init() void {
-    const app = instance.load(.seq_cst) orelse return;
+    const app = current() orelse return;
     app.on_init();
 }
 
 fn dispatch_menu_show() void {
-    const app = instance.load(.seq_cst) orelse return;
+    const app = current() orelse return;
     app.on_menu_show();
 }
 
 fn dispatch_shutdown() void {
-    const app = instance.load(.seq_cst) orelse return;
+    const app = current() orelse return;
     app.on_shutdown();
 }
 
 fn dispatch_timer_tick(timer_id: u32) void {
-    const app = instance.load(.seq_cst) orelse return;
+    const app = current() orelse return;
     app.on_timer_tick(timer_id);
 }
 
 fn dispatch_toggle_state() void {
-    const app = instance.load(.seq_cst) orelse return;
+    const app = current() orelse return;
     app.on_toggle_state();
 }

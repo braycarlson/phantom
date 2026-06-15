@@ -19,15 +19,17 @@ pub const IconManager = struct {
     }
 
     pub fn configure(self: *IconManager) void {
-        _ = IconBuilder.init(self.app.get_icon())
+        const icon = self.app.get_icon();
+
+        _ = IconBuilder.init(icon)
             .resource("active", constant.Resource.active_icon)
             .resource("inactive", constant.Resource.inactive_icon)
             .system("active_fallback", .application)
             .system("inactive_fallback", .shield)
-            .done();
+            .done() catch icon;
 
-        self.app.get_icon().set_current("inactive") catch {
-            self.app.get_icon().set_current("inactive_fallback") catch {};
+        icon.set_current("inactive") catch {
+            icon.set_current("inactive_fallback") catch {};
         };
     }
 
@@ -36,14 +38,15 @@ pub const IconManager = struct {
     }
 
     pub fn update(self: *IconManager, value: State) void {
+        const manager = self.app.get_icon();
         const icon_name = value.to_string();
         const fallback_name = if (value.is_active()) "active_fallback" else "inactive_fallback";
 
-        self.app.get_icon().set_current(icon_name) catch {
-            self.app.get_icon().set_current(fallback_name) catch {};
+        manager.set_current(icon_name) catch {
+            manager.set_current(fallback_name) catch {};
         };
 
-        const icon = self.app.get_icon().get_current() orelse return;
+        const icon = manager.get_current() orelse return;
 
         self.app.get_tray().set_icon(icon) catch {};
     }

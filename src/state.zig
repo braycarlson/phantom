@@ -1,5 +1,3 @@
-const std = @import("std");
-
 pub const State = enum(u8) {
     active = 0,
     inactive = 1,
