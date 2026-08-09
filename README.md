@@ -1,5 +1,4 @@
 # phantom
-A mouse mover to prevent inactivity on Windows.
 
-# Keyboard Shortcut
-- **Toggle:** <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>M</kbd>
+A tray application that nudges the mouse pointer on a timer, so a machine never reads as idle.
+Windows and Linux.

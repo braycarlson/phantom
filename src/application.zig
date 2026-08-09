@@ -1,185 +1,258 @@
 const std = @import("std");
 
 const arc = @import("arc");
-const nimble = @import("nimble");
-const win32 = @import("win32").everything;
 const wisp = @import("wisp");
 
 const constant = @import("constant.zig");
-const Dispatcher = @import("handler.zig").Dispatcher;
-const EventHandler = @import("handler.zig").EventHandler;
+const EventHandlerType = @import("handler.zig").EventHandlerType;
 const IconManager = @import("icon.zig").IconManager;
-const Logger = arc.Logger;
+const InputThread = @import("input.zig").InputThread;
 const MenuManager = @import("menu.zig").MenuManager;
 const NotificationManager = @import("notification.zig").NotificationManager;
 const State = @import("state.zig").State;
 
+const assert = std.debug.assert;
+
 const App = wisp.App;
-const Key = nimble.Key;
-const Response = nimble.Response;
-const Keyboard = nimble.Keyboard(.{});
-const Mouse = nimble.Mouse(.{});
+const Logger = arc.Logger;
 
-var instance: std.atomic.Value(?*Application) = std.atomic.Value(?*Application).init(null);
-
-const dispatcher = Dispatcher{
-    .on_exit = dispatch_exit,
-    .on_init = dispatch_init,
-    .on_menu_show = dispatch_menu_show,
-    .on_shutdown = dispatch_shutdown,
-    .on_timer_tick = dispatch_timer_tick,
-    .on_toggle_state = dispatch_toggle_state,
+pub const Error = error{
+    InputUnavailable,
+    RunFailed,
+    SetupFailed,
 };
+
+pub const name = "Phantom";
+
+comptime {
+    assert(name.len > 0);
+}
 
 pub const Application = struct {
     app: App,
-    handler: EventHandler,
     icon: IconManager,
-    keyboard: Keyboard,
+    input: InputThread,
     logger: ?*Logger,
     menu: MenuManager,
-    mouse: Mouse,
     notification: NotificationManager,
     random: std.Random.DefaultPrng,
     state: State,
 
-    pub fn init(self: *Application, logger: ?*Logger) void {
-        self.* = Application{
-            .app = undefined,
-            .handler = undefined,
-            .icon = undefined,
-            .keyboard = Keyboard.init(),
-            .logger = logger,
-            .menu = undefined,
-            .mouse = Mouse.init(),
-            .notification = undefined,
-            .random = std.Random.DefaultPrng.init(win32.GetTickCount64()),
-            .state = .inactive,
+    pub fn init(application: *Application, logger: ?*Logger) Error!void {
+        application.app.init(.{
+            .name = name,
+            .tooltip = name,
+            .initial_state = "inactive",
+        }) catch {
+            return Error.SetupFailed;
         };
 
-        self.app.init(.{
-            .name = "Phantom",
-            .tooltip = "Phantom",
-            .initial_state = "inactive",
-        });
+        errdefer application.app.deinit();
 
-        _ = self.app.configure();
+        application.icon = IconManager.init(&application.app);
+        application.input = InputThread.init();
+        application.logger = logger;
+        application.menu = MenuManager.init(&application.app);
+        application.notification = NotificationManager.init(&application.app, true);
+        application.random = std.Random.DefaultPrng.init(wisp.time.now_ms());
+        application.state = .inactive;
+
+        application.icon.configure() catch {
+            return Error.SetupFailed;
+        };
+
+        application.menu.build(application.state);
+
+        _ = application.app.configure();
+
+        assert(!application.app.is_running());
+        assert(!application.state.is_active());
+
+        application.log("Application is ready");
     }
 
-    pub fn configure(self: *Application) !void {
-        self.icon = IconManager.init(&self.app);
-        self.icon.configure();
+    pub fn deinit(application: *Application) void {
+        application.log("Shutting down");
 
-        self.menu = MenuManager.init(&self.app);
+        application.input.deinit();
+        application.app.deinit();
 
-        self.notification = NotificationManager.init(
-            &self.app,
-            &self.icon,
-            true,
-        );
-
-        self.handler = EventHandler.init(&self.app, &dispatcher);
-
-        _ = try self.keyboard.registry.register(
-            'M',
-            nimble.Modifier.from(.{ .ctrl = true, .alt = true }),
-            toggle_bind_wrapper,
-            self,
-            .{ .block_exempt = true },
-        );
-
-        self.log("Application is ready");
+        assert(!application.app.is_running());
     }
 
-    pub fn deinit(self: *Application) void {
-        self.log("Shutting down");
+    pub fn run(application: *Application) Error!void {
+        EventHandlerType(Application).register(&application.app.bus, application);
 
-        instance.store(null, .seq_cst);
+        application.input.start() catch |err| {
+            application.log_error("Unable to start the input hook", err);
 
-        self.keyboard.deinit();
-        self.mouse.deinit();
-        self.app.deinit();
+            return Error.InputUnavailable;
+        };
+
+        application.app.run() catch |err| {
+            application.log_error("Unable to run the application", err);
+
+            return Error.RunFailed;
+        };
     }
 
-    pub fn run(self: *Application) void {
-        instance.store(self, .seq_cst);
+    pub fn on_custom(application: *Application, code: u32) void {
+        if (code == constant.Message.toggle) {
+            application.toggle_state();
+        }
+    }
 
-        self.configure() catch |err| {
-            self.log_error("Failed to configure application", err);
+    pub fn on_icon_change(application: *Application, icon_name: []const u8) void {
+        assert(icon_name.len > 0);
+
+        const handle = application.app.icon.get(icon_name) orelse return;
+
+        application.app.tray.set_icon(handle) catch {
+            application.log("Unable to update the tray icon");
+
             return;
         };
+    }
 
-        self.handler.register();
+    pub fn on_init(application: *Application) void {
+        application.log("Initialized");
+    }
 
-        self.app.run() catch |err| {
-            self.log_error("Failed to run application", err);
+    pub fn on_menu_select(application: *Application, id: u32) void {
+        switch (id) {
+            constant.Menu.toggle => application.toggle_state(),
+            constant.Menu.exit => application.on_exit(),
+            else => {},
+        }
+    }
+
+    pub fn on_shutdown(application: *Application) void {
+        application.log("Shutdown event received");
+
+        if (!application.state.is_active()) {
+            return;
+        }
+
+        application.app.timer.stop(constant.Timer.move_id) catch {
+            application.log("Unable to stop the move timer");
+
+            return;
         };
     }
 
-    fn activate(self: *Application) void {
-        std.debug.assert(!self.state.is_active());
+    pub fn on_timer_tick(application: *Application, timer_id: u32) void {
+        if (timer_id == constant.Timer.move_id) {
+            application.move();
+        }
+    }
 
-        self.set_state(.active, "trigger activated");
+    fn activate(application: *Application) void {
+        assert(!application.state.is_active());
 
-        _ = self.app.get_timer().start(
+        application.set_state(.active, "trigger activated");
+
+        _ = application.app.timer.start(
             constant.Timer.move_id,
             constant.Timer.move_interval_ms,
         ) catch {
-            self.log("Failed to start move timer");
+            application.log("Unable to start the move timer");
+
             return;
         };
 
-        self.log("Move timer started");
+        application.log("Move timer started");
     }
 
-    fn deactivate(self: *Application) void {
-        std.debug.assert(self.state.is_active());
+    fn deactivate(application: *Application) void {
+        assert(application.state.is_active());
 
-        self.set_state(.inactive, "trigger activated");
+        application.set_state(.inactive, "trigger deactivated");
 
-        self.app.get_timer().stop(constant.Timer.move_id) catch {};
+        application.app.timer.stop(constant.Timer.move_id) catch {
+            application.log("Unable to stop the move timer");
 
-        self.log("Move timer stopped");
+            return;
+        };
+
+        application.log("Move timer stopped");
     }
 
-    fn move(self: *Application) void {
-        std.debug.assert(self.state.is_active());
+    fn move(application: *Application) void {
+        assert(application.state.is_active());
 
-        const random = self.random.random();
+        const random = application.random.random();
 
-        const offset_x = random.intRangeAtMost(i32, constant.Movement.offset_min, constant.Movement.offset_max);
-        const offset_y = random.intRangeAtMost(i32, constant.Movement.offset_min, constant.Movement.offset_max);
+        const offset_x = random.intRangeAtMost(
+            i32,
+            constant.Movement.offset_min,
+            constant.Movement.offset_max,
+        );
 
-        std.debug.assert(offset_x >= constant.Movement.offset_min);
-        std.debug.assert(offset_x <= constant.Movement.offset_max);
-        std.debug.assert(offset_y >= constant.Movement.offset_min);
-        std.debug.assert(offset_y <= constant.Movement.offset_max);
+        const offset_y = random.intRangeAtMost(
+            i32,
+            constant.Movement.offset_min,
+            constant.Movement.offset_max,
+        );
 
-        _ = self.mouse.move_relative(offset_x, offset_y);
+        assert(offset_x >= constant.Movement.offset_min);
+        assert(offset_x <= constant.Movement.offset_max);
+        assert(offset_y >= constant.Movement.offset_min);
+        assert(offset_y <= constant.Movement.offset_max);
 
-        self.log("Moved mouse");
+        application.input.move_relative(offset_x, offset_y);
+
+        application.log("Moved mouse");
     }
 
-    fn log(self: *Application, message: []const u8) void {
-        std.debug.assert(message.len > 0);
+    fn on_exit(application: *Application) void {
+        application.log("Exiting");
+        application.app.quit();
+    }
 
-        if (self.logger) |logger| {
+    fn set_state(application: *Application, value: State, reason: []const u8) void {
+        assert(reason.len > 0);
+
+        application.state = value;
+
+        application.icon.update(value);
+        application.menu.build(value);
+        application.menu.push();
+        application.log_state(value, reason);
+        application.notification.show(value);
+
+        assert(application.state == value);
+    }
+
+    fn toggle_state(application: *Application) void {
+        if (application.state.is_active()) {
+            application.deactivate();
+
+            return;
+        }
+
+        application.activate();
+    }
+
+    fn log(application: *Application, message: []const u8) void {
+        assert(message.len > 0);
+
+        if (application.logger) |logger| {
             logger.info(message, &.{}, @src());
         }
     }
 
-    fn log_error(self: *Application, message: []const u8, err: anyerror) void {
-        std.debug.assert(message.len > 0);
+    fn log_error(application: *Application, message: []const u8, err: anyerror) void {
+        assert(message.len > 0);
 
-        if (self.logger) |logger| {
+        if (application.logger) |logger| {
             logger.@"error"(message, &.{arc.err_from(err)}, @src());
         }
     }
 
-    fn log_state(self: *Application, value: State, reason: []const u8) void {
-        std.debug.assert(reason.len > 0);
+    fn log_state(application: *Application, value: State, reason: []const u8) void {
+        assert(reason.len > 0);
 
-        if (self.logger) |logger| {
+        if (application.logger) |logger| {
             logger.info(
                 "State changed",
                 &.{ arc.string("state", value.to_string()), arc.string("reason", reason) },
@@ -187,100 +260,4 @@ pub const Application = struct {
             );
         }
     }
-
-    fn on_exit(self: *Application) void {
-        self.log("Exiting");
-        self.app.quit();
-    }
-
-    fn on_init(self: *Application) void {
-        self.keyboard.start() catch {
-            self.log("Unable to start keyboard hook");
-        };
-
-        self.log("Initialized");
-    }
-
-    fn on_menu_show(self: *Application) void {
-        self.menu.build(self.state);
-    }
-
-    fn on_shutdown(self: *Application) void {
-        self.log("Shutdown event received");
-
-        if (self.state.is_active()) {
-            self.app.get_timer().stop(constant.Timer.move_id) catch {};
-        }
-    }
-
-    fn on_timer_tick(self: *Application, timer_id: u32) void {
-        if (timer_id == constant.Timer.move_id) {
-            self.move();
-        }
-    }
-
-    fn on_toggle_state(self: *Application) void {
-        self.toggle_state();
-    }
-
-    fn set_state(self: *Application, value: State, reason: []const u8) void {
-        std.debug.assert(reason.len > 0);
-
-        self.state = value;
-
-        self.icon.update(value);
-        self.log_state(value, reason);
-        self.notification.show(value);
-    }
-
-    fn toggle_state(self: *Application) void {
-        if (self.state.is_active()) {
-            self.deactivate();
-        } else {
-            self.activate();
-        }
-    }
 };
-
-fn toggle_bind_wrapper(context: *anyopaque, key: *const Key) Response {
-    _ = key;
-    const self: *Application = @ptrCast(@alignCast(context));
-
-    self.toggle_state();
-
-    return .consume;
-}
-
-fn current() ?*Application {
-    return instance.load(.seq_cst);
-}
-
-fn dispatch_exit() void {
-    const app = current() orelse return;
-    app.on_exit();
-}
-
-fn dispatch_init() void {
-    const app = current() orelse return;
-    app.on_init();
-}
-
-fn dispatch_menu_show() void {
-    const app = current() orelse return;
-    app.on_menu_show();
-}
-
-fn dispatch_shutdown() void {
-    const app = current() orelse return;
-    app.on_shutdown();
-}
-
-fn dispatch_timer_tick(timer_id: u32) void {
-    const app = current() orelse return;
-    app.on_timer_tick(timer_id);
-}
-
-fn dispatch_toggle_state() void {
-    const app = current() orelse return;
-    app.on_toggle_state();
-}

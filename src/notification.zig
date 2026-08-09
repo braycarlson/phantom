@@ -1,39 +1,68 @@
+const std = @import("std");
+
 const wisp = @import("wisp");
 
-const IconManager = @import("icon.zig").IconManager;
 const State = @import("state.zig").State;
 
+const assert = std.debug.assert;
+
 const App = wisp.App;
+
+pub const title = "Phantom";
+
+comptime {
+    assert(title.len > 0);
+}
 
 pub const NotificationManager = struct {
     app: *App,
     enabled: bool,
-    icon: *IconManager,
 
-    pub fn init(app: *App, icon: *IconManager, enabled: bool) NotificationManager {
-        return NotificationManager{
+    pub fn init(app: *App, enabled: bool) NotificationManager {
+        const result = NotificationManager{
             .app = app,
             .enabled = enabled,
-            .icon = icon,
         };
+
+        return result;
     }
 
-    pub fn set_enabled(self: *NotificationManager, value: bool) void {
-        self.enabled = value;
+    pub fn set_enabled(manager: *NotificationManager, value: bool) void {
+        manager.enabled = value;
+
+        assert(manager.enabled == value);
     }
 
-    pub fn show(self: *NotificationManager, value: State) void {
-        if (!self.enabled) {
+    pub fn show(manager: *NotificationManager, value: State) void {
+        if (!manager.enabled) {
             return;
         }
 
-        const icon = self.icon.get_icon_for_state(value) orelse return;
+        const body = body_of(value);
 
-        const message = if (value.is_active())
-            "Phantom is active"
-        else
-            "Phantom is inactive";
+        assert(body.len > 0);
 
-        self.app.get_tray().show_balloon_with_icon("Phantom", message, icon) catch {};
+        manager.app.notification.send_simple(title, body) catch {
+            return;
+        };
     }
 };
+
+fn body_of(value: State) []const u8 {
+    const result = switch (value) {
+        .active => "Phantom is active",
+        .inactive => "Phantom is inactive",
+    };
+
+    assert(result.len > 0);
+
+    return result;
+}
+
+const testing = std.testing;
+
+test "every state carries a distinct notification body" {
+    try testing.expectEqualStrings("Phantom is active", body_of(.active));
+    try testing.expectEqualStrings("Phantom is inactive", body_of(.inactive));
+    try testing.expect(!std.mem.eql(u8, body_of(.active), body_of(.inactive)));
+}
