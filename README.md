@@ -2,7 +2,7 @@
     <picture>
         <source media="(prefers-color-scheme: dark)" srcset="assets/phantom-lockup-on-dark.svg">
         <source media="(prefers-color-scheme: light)" srcset="assets/phantom-lockup-on-light.svg">
-        <img alt="phantom" src="assets/phantom-lockup-on-light.svg" width="340">
+        <img alt="phantom" src="assets/phantom-lockup-on-light.svg" width="375">
     </picture>
 </p>
 
