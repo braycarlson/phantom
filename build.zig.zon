@@ -4,7 +4,7 @@
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0x6896f6ae8bcbe782,
     .paths = .{
-        "asset",
+        "assets",
         "phantom.rc",
         "src",
         "build.zig",
