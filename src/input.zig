@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const nimble = @import("nimble");
-const wisp = @import("wisp");
+const umbra = @import("umbra");
 
 const constant = @import("constant.zig");
 
@@ -60,7 +60,7 @@ pub const InputThread = struct {
 };
 
 fn on_toggle(_: ?*anyopaque, _: ?*const Key) void {
-    _ = wisp.loop.post(constant.Message.toggle);
+    _ = umbra.loop.post(constant.Message.toggle);
 }
 
 const testing = std.testing;

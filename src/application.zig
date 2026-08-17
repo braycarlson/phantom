@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const arc = @import("arc");
-const wisp = @import("wisp");
+const umbra = @import("umbra");
 
 const constant = @import("constant.zig");
 const EventHandlerType = @import("handler.zig").EventHandlerType;
@@ -13,7 +13,7 @@ const State = @import("state.zig").State;
 
 const assert = std.debug.assert;
 
-const App = wisp.App;
+const App = umbra.App;
 const Logger = arc.Logger;
 
 pub const Error = error{
@@ -54,7 +54,7 @@ pub const Application = struct {
         application.logger = logger;
         application.menu = MenuManager.init(&application.app);
         application.notification = NotificationManager.init(&application.app, true);
-        application.random = std.Random.DefaultPrng.init(wisp.time.now_ms());
+        application.random = std.Random.DefaultPrng.init(umbra.time.now_ms());
         application.state = .inactive;
 
         application.icon.configure() catch {

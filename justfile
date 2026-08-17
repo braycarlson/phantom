@@ -60,7 +60,7 @@ format:
 # match the 256x256 canvas it declares, so rasterising it stretches the artwork
 # off its aspect ratio. The frame is already 32x32, so it is copied out without
 # a resize. src/icon.zig moves the alpha channel to the front at comptime,
-# because that is the ARGB order wisp ships to both backends.
+# because that is the ARGB order umbra ships to both backends.
 [unix]
 icons:
     convert 'asset/active.ico[2]' -depth 8 rgba:asset/active.rgba
