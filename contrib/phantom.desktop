@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Phantom
+Comment=Mouse jiggler
+Keywords=mouse;jiggler;idle;
+Exec=systemctl --user start phantom.service
+Icon=phantom
+Terminal=false

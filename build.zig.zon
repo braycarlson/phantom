@@ -1,0 +1,25 @@
+.{
+    .name = .phantom,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.17.1",
+    .fingerprint = 0x6896f6ae8bcbe782,
+    .paths = .{
+        "assets",
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "phantom.rc",
+        "src",
+    },
+    .dependencies = .{
+        .arc = .{
+            .path = "../arc",
+        },
+        .nimble = .{
+            .path = "../nimble",
+        },
+        .umbra = .{
+            .path = "../umbra",
+        },
+    },
+}
